@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
+import '@/shims/web-deps';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AlertProvider, AuthProvider } from '@/template';
