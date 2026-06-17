@@ -12,7 +12,9 @@
       "android": {
         "buildType": "apk"
       },
-      "node": "18.18.0"
+      "env": {
+        "YARN_NODE_LINKER": "node-modules"
+      }
     },
     "production": {}
   },
