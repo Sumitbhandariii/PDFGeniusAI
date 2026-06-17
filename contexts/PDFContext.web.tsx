@@ -1,11 +1,8 @@
 /**
- * PDF Context - Global PDF file state management
- * Handles recent files, favorites, and reading progress
+ * PDF Context - Web
+ * Web-compatible version using localStorage instead of AsyncStorage + expo-file-system
  */
 import React, { createContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
-import { getSupabaseClient } from '@/template';
 
 export interface PDFFile {
   id: string;
@@ -21,7 +18,6 @@ export interface PDFFile {
   tags: string[];
   createdAt: string;
   updatedAt: string;
-  // Cloud sync
   cloudPath?: string;
   isSynced: boolean;
 }
@@ -66,61 +62,52 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
+function loadFromStorage(): PDFFile[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveToStorage(files: PDFFile[]): void {
+  try {
+    // On web, avoid storing large data URIs in localStorage to prevent quota errors
+    const toSave = files.map((f) => ({
+      ...f,
+      // Keep data URIs for small files only (< 2MB); otherwise just store metadata
+      localUri: f.localUri && f.localUri.length > 2 * 1024 * 1024 ? f.localUri.substring(0, 100) + '...' : f.localUri,
+    }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  } catch (e) {
+    console.warn('localStorage quota exceeded, saving metadata only');
+    try {
+      const minimal = files.map(({ localUri, ...rest }) => ({ ...rest, localUri: '' }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(minimal));
+    } catch {}
+  }
+}
+
 export function PDFProvider({ children }: { children: ReactNode }) {
   const [files, setFiles] = useState<PDFFile[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Load files from local storage on mount
   useEffect(() => {
-    loadFiles();
+    const loaded = loadFromStorage();
+    setFiles(loaded);
+    setLoading(false);
   }, []);
 
-  const loadFiles = async () => {
-    try {
-      setLoading(true);
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed: PDFFile[] = JSON.parse(raw);
-        // Filter out files whose local URIs no longer exist
-        const valid = await Promise.all(
-          parsed.map(async (f) => {
-            try {
-              const info = await FileSystem.getInfoAsync(f.localUri);
-              return info.exists ? f : null;
-            } catch {
-              return null;
-            }
-          })
-        );
-        setFiles(valid.filter(Boolean) as PDFFile[]);
-      }
-    } catch (e) {
-      console.error('Failed to load PDF files:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const persistFiles = async (updatedFiles: PDFFile[]) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedFiles));
-    } catch (e) {
-      console.error('Failed to persist files:', e);
-    }
-  };
+  const persistFiles = useCallback((updatedFiles: PDFFile[]) => {
+    saveToStorage(updatedFiles);
+  }, []);
 
   const addFile = useCallback(
     async (fileData: Omit<PDFFile, 'id' | 'createdAt' | 'updatedAt' | 'isSynced'>): Promise<PDFFile> => {
       const now = new Date().toISOString();
-      const newFile: PDFFile = {
-        ...fileData,
-        id: generateId(),
-        createdAt: now,
-        updatedAt: now,
-        isSynced: false,
-      };
+      const newFile: PDFFile = { ...fileData, id: generateId(), createdAt: now, updatedAt: now, isSynced: false };
 
-      // Check for duplicates by name + size
       const isDuplicate = files.some(
         (f) => f.name === newFile.name && f.fileSize === newFile.fileSize && !f.isDeleted
       );
@@ -131,10 +118,10 @@ export function PDFProvider({ children }: { children: ReactNode }) {
 
       const updated = [newFile, ...files];
       setFiles(updated);
-      await persistFiles(updated);
+      persistFiles(updated);
       return newFile;
     },
-    [files]
+    [files, persistFiles]
   );
 
   const updateFile = useCallback(
@@ -143,51 +130,36 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         f.id === id ? { ...f, ...updates, updatedAt: new Date().toISOString() } : f
       );
       setFiles(updated);
-      await persistFiles(updated);
+      persistFiles(updated);
     },
-    [files]
+    [files, persistFiles]
   );
 
-  const deleteFile = useCallback(
-    async (id: string) => {
-      await updateFile(id, { isDeleted: true });
-    },
-    [updateFile]
-  );
+  const deleteFile = useCallback(async (id: string) => {
+    await updateFile(id, { isDeleted: true });
+  }, [updateFile]);
 
-  const restoreFile = useCallback(
-    async (id: string) => {
-      await updateFile(id, { isDeleted: false });
-    },
-    [updateFile]
-  );
+  const restoreFile = useCallback(async (id: string) => {
+    await updateFile(id, { isDeleted: false });
+  }, [updateFile]);
 
   const permanentlyDelete = useCallback(
     async (id: string) => {
       const file = files.find((f) => f.id === id);
-      if (file) {
-        try {
-          const info = await FileSystem.getInfoAsync(file.localUri);
-          if (info.exists) {
-            await FileSystem.deleteAsync(file.localUri, { idempotent: true });
-          }
-        } catch (e) {
-          console.warn('Could not delete local file:', e);
-        }
+      if (file && file.localUri?.startsWith('blob:')) {
+        URL.revokeObjectURL(file.localUri);
       }
       const updated = files.filter((f) => f.id !== id);
       setFiles(updated);
-      await persistFiles(updated);
+      persistFiles(updated);
     },
-    [files]
+    [files, persistFiles]
   );
 
   const toggleFavorite = useCallback(
     async (id: string) => {
       const file = files.find((f) => f.id === id);
-      if (file) {
-        await updateFile(id, { isFavorite: !file.isFavorite });
-      }
+      if (file) await updateFile(id, { isFavorite: !file.isFavorite });
     },
     [files, updateFile]
   );
@@ -195,16 +167,14 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const updateReadingProgress = useCallback(
     async (id: string, page: number, total: number) => {
       const progress = total > 0 ? page / total : 0;
-      await updateFile(id, {
-        lastPage: page,
-        readingProgress: progress,
-      });
+      await updateFile(id, { lastPage: page, readingProgress: progress });
     },
     [updateFile]
   );
 
   const refreshFiles = useCallback(async () => {
-    await loadFiles();
+    const loaded = loadFromStorage();
+    setFiles(loaded);
   }, []);
 
   const getFileById = useCallback(
@@ -212,7 +182,6 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     [files]
   );
 
-  // Derived state
   const activeFiles = files.filter((f) => !f.isDeleted);
   const recentFiles = [...activeFiles]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())

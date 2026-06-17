@@ -1,11 +1,10 @@
 /**
- * PDF Service - File operations for PDF management
+ * PDF Service - Native (iOS/Android)
  * Handles picking, copying, and managing PDF files
  */
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { Platform } from 'react-native';
 
 const PDF_DIR = `${FileSystem.documentDirectory}pdfs/`;
 
@@ -16,9 +15,6 @@ export interface PickedPDF {
   mimeType: string;
 }
 
-/**
- * Ensure the PDFs directory exists
- */
 export async function ensurePDFDirectory(): Promise<void> {
   const dirInfo = await FileSystem.getInfoAsync(PDF_DIR);
   if (!dirInfo.exists) {
@@ -26,9 +22,6 @@ export async function ensurePDFDirectory(): Promise<void> {
   }
 }
 
-/**
- * Open document picker and return selected PDF(s)
- */
 export async function pickPDFFile(multiple: boolean = false): Promise<PickedPDF[]> {
   try {
     const result = await DocumentPicker.getDocumentAsync({
@@ -53,13 +46,9 @@ export async function pickPDFFile(multiple: boolean = false): Promise<PickedPDF[
   }
 }
 
-/**
- * Copy PDF to app's permanent storage directory
- */
 export async function copyPDFToStorage(sourceUri: string, fileName: string): Promise<string> {
   await ensurePDFDirectory();
 
-  // Sanitize filename
   const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
   const timestamp = Date.now();
   const destPath = `${PDF_DIR}${timestamp}_${safeName}`;
@@ -68,7 +57,6 @@ export async function copyPDFToStorage(sourceUri: string, fileName: string): Pro
     await FileSystem.copyAsync({ from: sourceUri, to: destPath });
     return destPath;
   } catch (e: any) {
-    // If copy fails, try moving
     try {
       await FileSystem.moveAsync({ from: sourceUri, to: destPath });
       return destPath;
@@ -78,34 +66,10 @@ export async function copyPDFToStorage(sourceUri: string, fileName: string): Pro
   }
 }
 
-/**
- * Get file size in human-readable format
- */
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-/**
- * Format reading progress as percentage
- */
-export function formatProgress(progress: number): string {
-  return `${Math.round(progress * 100)}%`;
-}
-
-/**
- * Get file info from URI
- */
 export async function getFileInfo(uri: string): Promise<FileSystem.FileInfo> {
   return FileSystem.getInfoAsync(uri);
 }
 
-/**
- * Share a PDF file
- */
 export async function sharePDF(uri: string): Promise<void> {
   const isAvailable = await Sharing.isAvailableAsync();
   if (!isAvailable) {
@@ -117,9 +81,6 @@ export async function sharePDF(uri: string): Promise<void> {
   });
 }
 
-/**
- * Delete a PDF from storage
- */
 export async function deletePDFFromStorage(uri: string): Promise<void> {
   try {
     const info = await FileSystem.getInfoAsync(uri);
@@ -131,9 +92,18 @@ export async function deletePDFFromStorage(uri: string): Promise<void> {
   }
 }
 
-/**
- * Calculate reading time estimate (avg 200 words/min, ~250 words/page)
- */
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+export function formatProgress(progress: number): string {
+  return `${Math.round(progress * 100)}%`;
+}
+
 export function estimateReadingTime(pageCount: number): string {
   const minutes = Math.ceil((pageCount * 250) / 200);
   if (minutes < 60) return `${minutes} min read`;
@@ -142,9 +112,6 @@ export function estimateReadingTime(pageCount: number): string {
   return mins > 0 ? `${hours}h ${mins}m read` : `${hours}h read`;
 }
 
-/**
- * Get relative time string
- */
 export function getRelativeTime(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
@@ -163,9 +130,6 @@ export function getRelativeTime(dateString: string): string {
   return `${Math.floor(diffDays / 365)}y ago`;
 }
 
-/**
- * Generate a color based on filename (for visual consistency)
- */
 export function getFileColor(name: string): string {
   const colors = [
     '#6366F1', '#8B5CF6', '#EC4899',

@@ -1,11 +1,11 @@
 /**
- * Gemini AI Service
+ * Gemini AI Service - Native (iOS/Android)
  * Handles all AI operations using Google's Gemini 1.5 Flash API
- * Supports multimodal PDF analysis (text + PDF as base64)
+ * Uses expo-file-system for native PDF base64 reading
  */
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { APP_CONFIG, AI_PROMPTS } from '@/constants/config';
+import { APP_CONFIG } from '@/constants/config';
 
 const API_KEY_STORAGE = 'gemini_api_key';
 
@@ -19,25 +19,19 @@ export interface ChatMessage {
   parts: Array<{ text: string }>;
 }
 
-// Get stored API key
 export async function getGeminiApiKey(): Promise<string | null> {
   return AsyncStorage.getItem(API_KEY_STORAGE);
 }
 
-// Save API key
 export async function saveGeminiApiKey(key: string): Promise<void> {
   await AsyncStorage.setItem(API_KEY_STORAGE, key);
 }
 
-// Check if API key is configured
 export async function hasGeminiApiKey(): Promise<boolean> {
   const key = await getGeminiApiKey();
   return !!(key && key.trim().length > 0);
 }
 
-/**
- * Core Gemini API call with text-only input
- */
 export async function callGemini(
   prompt: string,
   history?: ChatMessage[]
@@ -57,10 +51,7 @@ export async function callGemini(
     if (history && history.length > 0) {
       contents.push(...history);
     }
-    contents.push({
-      role: 'user',
-      parts: [{ text: prompt }],
-    });
+    contents.push({ role: 'user', parts: [{ text: prompt }] });
 
     const response = await fetch(url, {
       method: 'POST',
@@ -99,10 +90,7 @@ export async function callGemini(
       data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') ||
       '';
 
-    if (!text) {
-      return { text: '', error: 'No response from AI. Please try again.' };
-    }
-
+    if (!text) return { text: '', error: 'No response from AI. Please try again.' };
     return { text };
   } catch (e: any) {
     if (e.message?.includes('Network')) {
@@ -112,10 +100,6 @@ export async function callGemini(
   }
 }
 
-/**
- * Call Gemini with PDF file as inline data (multimodal)
- * Gemini 1.5 Flash can natively read PDF files
- */
 export async function callGeminiWithPDF(
   pdfUri: string,
   prompt: string
@@ -129,7 +113,6 @@ export async function callGeminiWithPDF(
   }
 
   try {
-    // Check file size before sending
     const fileInfo = await FileSystem.getInfoAsync(pdfUri);
     if (!fileInfo.exists) {
       return { text: '', error: 'PDF file not found.' };
@@ -143,7 +126,6 @@ export async function callGeminiWithPDF(
       };
     }
 
-    // Read PDF as base64
     const base64Data = await FileSystem.readAsStringAsync(pdfUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
@@ -158,20 +140,12 @@ export async function callGeminiWithPDF(
           {
             role: 'user',
             parts: [
-              {
-                inline_data: {
-                  mime_type: 'application/pdf',
-                  data: base64Data,
-                },
-              },
+              { inline_data: { mime_type: 'application/pdf', data: base64Data } },
               { text: prompt },
             ],
           },
         ],
-        generationConfig: {
-          temperature: 0.5,
-          maxOutputTokens: 8192,
-        },
+        generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
       }),
     });
 
@@ -181,9 +155,6 @@ export async function callGeminiWithPDF(
       try {
         const errJson = JSON.parse(errText);
         errMsg = errJson?.error?.message || errMsg;
-        if (response.status === 400 && errMsg.includes('API_KEY')) {
-          errMsg = 'Invalid API key. Please check your Gemini API key in Settings.';
-        }
       } catch {}
       return { text: '', error: errMsg };
     }
@@ -194,10 +165,7 @@ export async function callGeminiWithPDF(
       data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') ||
       '';
 
-    if (!text) {
-      return { text: '', error: 'No response from AI. Please try again.' };
-    }
-
+    if (!text) return { text: '', error: 'No response from AI. Please try again.' };
     return { text };
   } catch (e: any) {
     if (e.message?.includes('Network')) {
@@ -207,23 +175,13 @@ export async function callGeminiWithPDF(
   }
 }
 
-/**
- * Generate PDF summary using multimodal PDF input
- */
-export async function generateSummary(
-  pdfUri: string,
-  detailed: boolean = false
-): Promise<GeminiResponse> {
+export async function generateSummary(pdfUri: string, detailed: boolean = false): Promise<GeminiResponse> {
   const prompt = detailed
     ? `Provide a detailed academic-style summary of this document. Include: **Executive Summary**, **Main Themes**, **Key Arguments**, **Important Data/Statistics**, and **Conclusions**. Use markdown formatting.`
     : `Provide a comprehensive, well-structured summary of this PDF document. Format your response with clear sections: **Overview**, **Key Points**, and **Conclusion**. Be concise but thorough. Use markdown formatting.`;
-
   return callGeminiWithPDF(pdfUri, prompt);
 }
 
-/**
- * Generate study notes from PDF
- */
 export async function generateNotes(pdfUri: string): Promise<GeminiResponse> {
   const prompt = `Convert this PDF into structured study notes. Format as:
 ## Main Topics
@@ -239,13 +197,9 @@ export async function generateNotes(pdfUri: string): Promise<GeminiResponse> {
 - Any formulas, statistics, or critical data
 
 Use markdown formatting throughout.`;
-
   return callGeminiWithPDF(pdfUri, prompt);
 }
 
-/**
- * Generate flashcards from PDF
- */
 export async function generateFlashcards(pdfUri: string): Promise<GeminiResponse> {
   const prompt = `Generate 10 comprehensive study flashcards from this document. Format each as:
 
@@ -255,13 +209,9 @@ export async function generateFlashcards(pdfUri: string): Promise<GeminiResponse
 
 ---
 Make questions test understanding and application, not just memorization. Cover the most important concepts.`;
-
   return callGeminiWithPDF(pdfUri, prompt);
 }
 
-/**
- * Generate MCQ quiz from PDF
- */
 export async function generateQuiz(pdfUri: string): Promise<GeminiResponse> {
   const prompt = `Create 5 multiple choice questions (MCQs) from this document. Format:
 
@@ -270,18 +220,14 @@ A) [Option]
 B) [Option]
 C) [Option]
 D) [Option]
-✅ **Answer:** [Letter] - [Brief explanation of why this is correct]
+Answer: [Letter] - [Brief explanation of why this is correct]
 
 ---
 
 Make questions test deep understanding of the material.`;
-
   return callGeminiWithPDF(pdfUri, prompt);
 }
 
-/**
- * Extract keywords from PDF
- */
 export async function extractKeywords(pdfUri: string): Promise<GeminiResponse> {
   const prompt = `Extract the most important keywords, phrases, and concepts from this document. Format as:
 
@@ -296,38 +242,21 @@ export async function extractKeywords(pdfUri: string): Promise<GeminiResponse> {
 
 ## Key Themes
 [List 3-5 overarching themes]`;
-
   return callGeminiWithPDF(pdfUri, prompt);
 }
 
-/**
- * Translate PDF content
- */
-export async function translateContent(
-  pdfUri: string,
-  targetLanguage: string
-): Promise<GeminiResponse> {
+export async function translateContent(pdfUri: string, targetLanguage: string): Promise<GeminiResponse> {
   const prompt = `Translate the content of this PDF to ${targetLanguage}. Maintain the original formatting, structure, and meaning. Translate all text including headings, body text, and captions.`;
   return callGeminiWithPDF(pdfUri, prompt);
 }
 
-/**
- * Chat with PDF - single turn
- */
-export async function chatWithPDF(
-  pdfUri: string,
-  question: string
-): Promise<GeminiResponse> {
+export async function chatWithPDF(pdfUri: string, question: string): Promise<GeminiResponse> {
   const prompt = `You are a helpful AI assistant. Answer the following question based on the PDF document provided. If the answer is not in the document, clearly state that. Be accurate, helpful, and cite relevant sections when possible.
 
 Question: ${question}`;
-
   return callGeminiWithPDF(pdfUri, prompt);
 }
 
-/**
- * Simplify or rewrite content
- */
 export async function rewriteContent(
   pdfUri: string,
   style: 'simple' | 'professional' | 'student'
@@ -337,8 +266,6 @@ export async function rewriteContent(
     professional: 'formal, professional language suitable for a business or academic audience. Maintain technical accuracy.',
     student: 'student-friendly language with clear explanations, examples, and study tips.',
   };
-
   const prompt = `Rewrite the content of this PDF document in ${styleMap[style]} Maintain the key information and structure but adapt the language and style.`;
-
   return callGeminiWithPDF(pdfUri, prompt);
 }
